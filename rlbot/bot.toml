@@ -1,0 +1,16 @@
+#:schema https://rlbot.org/schemas/agent.json
+[settings]
+agent_id = "SoldierDoge/GalactusV2"
+name = "GalactusV2"
+loadout_file = "loadout.toml"
+run_command = "GGLBot.exe"
+run_command_linux = "./GGLBot"
+logo_file = "logo.png"
+
+[details]
+description = "Galactus is a multi-mode bot capable of doing many mechanics"
+fun_fact = "Named after a guy that eats planets"
+source_link = "https://github.com/SoldierDoge/GalactusV2"
+developer = "SoldierDoge"
+language = "C++"
+tags = ["1v1", "teamplay"]

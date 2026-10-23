@@ -1,0 +1,70 @@
+# GalactusV2
+
+RLBot v5 botpack submission, built from GGLBot's CPU `bob` branch at
+`bb9178779f0012f4d340083a21df1bd840d32c4d`.
+
+Checkpoint: **201349702397** (201.35B). Agent ID: `SoldierDoge/GalactusV2`.
+
+Galactus uses 258 observations, 90 discrete actions, tick skip 8 and action delay 7.
+The deployed model has two shared and four policy layers of 1024 units each,
+LayerNorm and LeakyReLU, matching the existing Galactus adapter.
+
+The CPU CMake configuration, Dockerfile and launcher are unchanged from upstream.
+Initialize public dependencies with `git submodule update --init --recursive`.
+Build with `bob build bob.toml`, or use the native instructions below.
+
+Each car runs separately. The observation builder includes boost-pad timers,
+previous controls, padded player slots and five RLBot ball-prediction samples.
+Only inference weights are included; there is no training or optimizer state.
+Model hashes and validation results are in `rlbot/model_manifest.json`.
+
+The Windows build passed a live RLBot 2v2 smoke check against the installed
+GalactusV2: 0–1 after two minutes. The full Bob container build has not been
+verified locally because Docker Desktop could not start.
+
+---
+
+# GGLBot - Bob Branch
+The main purpose of this branch of GGLBot is to submit your bot to tournaments or Rocket Host since it allows the host to build your bot using bob the bot builder. If you are just wanting to play your bot in RLBot, the `main` branch is likely what you want to use since it is a simpler process.
+
+## Instructions
+The instructions are broken down into three steps:
+1. Preparing your bot
+2. Submitting your bot
+3. (Optional) Building your bot with bob
+
+If you are submitting your bot, you only need to worry about step one and two. The host will build your bot for you.
+
+### 1. Preparing your bot for submission
+* Clone the bob branch of this repo recursively: `git clone --branch bob https://github.com/SubparN0va/GGLBot --recurse-submodules`
+* Update `RLBotMain.cpp` with your Obs Builder, Action Parser, and InferUnit config
+  * If creating new obs or parser files, make sure you update the `#include` at the top of `RLBotClient.h`. The Docker builds in a Linux container, which means the headers are case sensitive. Make sure they match exactly, and keep in mind if you're using MSVC it is NOT case sensitive, which means if you get it wrong you won't know until the host builds it in the Linux container.
+* Put your models (.lt files) into the `rlbot\` folder (these will be copied to the output folder automatically at build time)
+* When the host builds your bot, the docker will download and use Libtorch CPU Version 2.7.0 by default
+  * If you need a specific version of LibTorch for your bot, update the Linux and Windows LibTorch download URLs in `cpp.Dockerfile` (lines 80 and 95).
+* Update the `project_name` in bob.toml, and all of bot.toml and loadout.toml to your preference
+* If you're using a logo, name it `logo.png` and put it in the `rlbot\` folder
+
+The build produces a small native launcher named `GGLBot` and a Torch-linked core in `000-runtime\`. The launcher searches for `torch-archive` near the bot first, then checks the current user's standard RLBot data directory. This allows a `bob_build\` package to run from any location without bundling the large LibTorch runtime.
+
+Note: At this point, if you want, you can build your bot using your IDE to ensure it compiles. Test the executable through RLBot v5 so it receives the required RLBot connection environment. If you do build your bot before submitting it, make sure you don't include the `out\` or `.vs\` folders and don't include generated executables or the `rlbot\000-runtime\` folder when creating your .zip file.
+
+### 2. Submitting your bot
+* Package the following files and folders into a .zip file:
+  * `cpp-interface\`
+  * `inc\`
+  * `launcher\`
+  * `rlbot\`
+  * `src\`
+  * `bob.toml`
+  * `CMakeLists.txt`
+  * `cpp.Dockerfile`
+* Send the .zip file to the host
+
+### 3. Building your bot with bob
+Note: If you're submitting your bot to a tournament or Rocket Host, you can skip this step! The host will build your bot for you using the instructions below.
+* Install bob the bot builder from `https://github.com/swz-git/bob`
+* Install Docker Desktop and make sure it's set to Linux containers
+* In command prompt, navigate to your GGLBot root directory. Then enter `<path to bob.exe> build bob.toml`
+* Make sure RLBot's `torch-archive` runtime is installed
+* In RLBot v5, add the `bob_build\` folder; it can remain outside the RLBot bots directory

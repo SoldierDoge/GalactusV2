@@ -1,0 +1,16 @@
+/.vs
+/out/build
+*.lt
+*.exe
+CMakeSettings.json
+/libtorch
+/bob_build
+/rlbot/000-runtime
+rlbot/logo.png
+/build
+/.idea
+
+# Distributed inference models and bot logo.
+!rlbot/POLICY.lt
+!rlbot/SHARED_HEAD.lt
+!rlbot/logo.png

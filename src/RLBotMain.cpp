@@ -1,0 +1,225 @@
+#include "RLBotClient.h"
+
+#include <rlbot/BotManager.h>
+
+#include <filesystem>
+#include <fstream>
+#include <optional>
+
+namespace
+{
+    // Helper functions used to read bot.toml
+    inline void ltrim(std::string& s) {
+        size_t i = 0;
+        while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')) i++;
+        s.erase(0, i);
+    }
+    inline void rtrim(std::string& s) {
+        while (!s.empty()) {
+            char c = s.back();
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') s.pop_back();
+            else break;
+        }
+    }
+    inline void trim(std::string& s) { ltrim(s); rtrim(s); }
+
+    inline bool starts_with(const std::string& s, const char* prefix) {
+        const size_t n = std::char_traits<char>::length(prefix);
+        return s.size() >= n && s.compare(0, n, prefix) == 0;
+    }
+
+    // Reads [settings] agent_id = "..." from bot.toml
+    std::optional<std::string> ReadAgentIdFromBotToml(const std::filesystem::path& botTomlPath)
+    {
+        std::ifstream f(botTomlPath);
+        if (!f.is_open())
+            return std::nullopt;
+
+        bool inSettings = false;
+        std::string line;
+
+        while (std::getline(f, line)) {
+            // Strip TOML comments (# ...)
+            if (auto hash = line.find('#'); hash != std::string::npos)
+                line.erase(hash);
+
+            trim(line);
+            if (line.empty()) continue;
+
+            // Section headers
+            if (line.front() == '[' && line.back() == ']') {
+                inSettings = (line == "[settings]");
+                continue;
+            }
+
+            if (!inSettings) continue;
+
+            // Look for agent_id = "..."
+            // Check key at start after trimming.
+            if (starts_with(line, "agent_id")) {
+                auto eq = line.find('=');
+                if (eq == std::string::npos) continue;
+
+                std::string rhs = line.substr(eq + 1);
+                trim(rhs);
+
+                if (rhs.empty()) continue;
+
+                char quote = rhs.front();
+                if (quote != '"' && quote != '\'') continue;
+
+                auto endq = rhs.find(quote, 1);
+                if (endq == std::string::npos) continue;
+
+                return rhs.substr(1, endq - 1);
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    std::shared_ptr<const SharedBotContext>& SpawnContext() noexcept
+    {
+        static std::shared_ptr<const SharedBotContext> ctx;
+        return ctx;
+    }
+
+    void SetSpawnContext(std::shared_ptr<const SharedBotContext> ctx) noexcept
+    {
+        SpawnContext() = std::move(ctx);
+    }
+
+    std::unique_ptr<rlbot::Bot> SpawnBot(std::unordered_set<unsigned> indices,
+        unsigned team,
+        std::string name) noexcept
+    {
+        auto ctx = SpawnContext();
+        if (!ctx)
+            return {};
+
+        return std::make_unique<RLBotBot>(std::move(indices), team, std::move(name), std::move(ctx));
+    }
+
+    class RLBotBotManager final : public rlbot::BotManagerBase
+    {
+    public:
+        explicit RLBotBotManager(bool batchHivemind = false) noexcept
+            : rlbot::BotManagerBase(batchHivemind, SpawnBot)
+        {
+        }
+    };
+} // anonymous namespace
+
+
+int main(int argc, char** argv)
+{
+    auto ctx = std::make_shared<SharedBotContext>();
+
+    // ------------------------------------------------------------------------
+    // Set the following to match the configuration your model was trained with
+    // ------------------------------------------------------------------------
+    ctx->obs = std::make_shared<RLGC::GalactusOBS>(3);
+    ctx->act = std::make_shared<RLGC::DefaultAction>();
+
+    ctx->params.tickSkip = 8;
+    ctx->params.actionDelay = ctx->params.tickSkip - 1;
+
+    int obsSize = 258; // You can find this from the console when running training
+
+    // Shared head config
+    GGL::InferPartialModelConfig sharedHeadCfg;
+    sharedHeadCfg.layerSizes = { 1024, 1024 };
+    sharedHeadCfg.addLayerNorm = true;
+    sharedHeadCfg.activationType = GGL::ModelActivationType::LEAKY_RELU;
+    sharedHeadCfg.addOutputLayer = false; // <- leave this false
+
+    // Policy config
+    GGL::InferPartialModelConfig policyCfg;
+    policyCfg.layerSizes = { 1024, 1024, 1024, 1024 };
+    policyCfg.addLayerNorm = true;
+    policyCfg.activationType = GGL::ModelActivationType::LEAKY_RELU;
+    policyCfg.addOutputLayer = true;
+
+    const bool useBallPrediction = true; // Set to true if using the built in ball prediction sent to RLBotBot::update in RLBotClient
+
+    // ------------------------------------------
+    // Everything below can usually be left as is
+    // ------------------------------------------
+    std::filesystem::path exeDir;
+    if (!argv[0]) {
+        exeDir = std::filesystem::current_path().parent_path();
+    }
+    else {
+        std::filesystem::path p(argv[0]);
+        exeDir = p.parent_path();
+    }
+    std::filesystem::path parentDir = exeDir.parent_path();
+
+    // If there are no .lt files in cwd, but there are in parent, use parent.
+    bool hasLtInExeDir = false;
+    bool hasLtInParent = false;
+
+    auto hasLtFiles = [](const std::filesystem::path& dir) -> bool {
+        std::error_code ec;
+        if (!std::filesystem::exists(dir, ec) || !std::filesystem::is_directory(dir, ec)) return false;
+
+        for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
+            if (ec) break;
+            if (e.is_regular_file(ec) && e.path().extension() == ".lt") return true;
+        }
+        return false;
+        };
+
+    // Search for the .lt models (bob puts them in parentDir, building with IDE does not)
+    hasLtInExeDir = hasLtFiles(exeDir);
+    hasLtInParent = hasLtFiles(parentDir);
+
+    if (!hasLtInExeDir && hasLtInParent) {
+        exeDir = parentDir;
+    }
+
+    bool useGPU = false;
+
+    ctx->inferUnit = std::make_shared<GGL::InferUnit>(
+        ctx->obs.get(),
+        obsSize,
+        ctx->act.get(),
+        sharedHeadCfg,
+        policyCfg,
+        exeDir, // Put model files next to bot.toml
+        useGPU
+    );
+
+    SetSpawnContext(ctx);
+
+    auto const serverHost = []() -> char const* {
+        auto const env = std::getenv("RLBOT_SERVER_IP");
+        return env ? env : "127.0.0.1";
+        }();
+
+    auto const serverPort = []() -> char const* {
+        auto const env = std::getenv("RLBOT_SERVER_PORT");
+        return env ? env : "23234";
+        }();
+
+    // Read agent_id from bot.toml near the exe
+    std::string agentIdStr = "SoldierDoge/GalactusV2"; // fallback default
+
+    const std::filesystem::path botTomlPath1 = exeDir / "bot.toml";
+    const std::filesystem::path botTomlPath2 = exeDir.parent_path() / "bot.toml";
+
+    if (auto maybeId = ReadAgentIdFromBotToml(botTomlPath1)) {
+        agentIdStr = *maybeId;
+    }
+    else if (auto maybeId = ReadAgentIdFromBotToml(botTomlPath2)) {
+        agentIdStr = *maybeId;
+    }
+
+    RLBotBotManager manager(false);
+
+    if (!manager.connect(serverHost, serverPort, agentIdStr.c_str(), useBallPrediction)) {
+        return EXIT_FAILURE;
+    }
+
+    return 0;
+}
