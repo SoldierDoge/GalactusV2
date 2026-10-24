@@ -16,11 +16,6 @@ Build with `bob build bob.toml`, or use the native instructions below.
 Each car runs separately. The observation builder includes boost-pad timers,
 previous controls, padded player slots and five RLBot ball-prediction samples.
 Only inference weights are included; there is no training or optimizer state.
-Model hashes and validation results are in `rlbot/model_manifest.json`.
-
-The Windows build passed a live RLBot 2v2 smoke check against the installed
-GalactusV2: 0–1 after two minutes. The full Bob container build has not been
-verified locally because Docker Desktop could not start.
 
 ---
 
